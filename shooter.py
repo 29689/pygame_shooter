@@ -1,286 +1,373 @@
-import pygame
+import sys, pygame
+import random
 import os
 
-# Initialize the Pygame library
 pygame.init()
 
-# Screen dimensions
 SCREEN_WIDTH = 800
-SCREEN_HEIGHT = int(SCREEN_WIDTH * 0.8) # The height is 80% of the width
+SCREEN_HEIGHT = int(SCREEN_WIDTH * 0.8)
 
-# Set up the clock for FPS control
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption('Shooter')
+
+background = (150, 50, 175)
+
 clock = pygame.time.Clock()
-FPS = 60 # Frames per second
 
-# Variables to track movement
-moving_left = False
-moving_right = False
+frame_rate = 60
 
-# Movement for player 2
-ml = False
-mr = False
-
-# Gravity constant for character movement
 gravity = .75
 
-# Create the display screen and set the caption
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption('Diego\'s Shooter Game')
+line_color = (255, 0, 0)
 
-# Background color and function to draw the background
-background_color = (124, 45, 255)
-
+exp_group = pygame.sprite.Group()
 def draw_background():
-    screen.fill(background_color) # Fill the screen with the background color
-    pygame.draw.line(screen, (255, 0, 0), (0, 300), (SCREEN_WIDTH, 300)) # Draw a red line to separate sections
+    screen.fill(background)
+    pygame.draw.line(screen, line_color, (0, 300), (SCREEN_WIDTH, 300))
 
-# Soldier class representing the player or enemy character
+
 class Soldier(pygame.sprite.Sprite):
-    def __init__(self, x, y, scale, speed, char_type, ammo, health):
-        pygame.sprite.Sprite.__init__(self) # Initialize the sprite class
-        self.char_type = char_type # Character type (player or enemy)
-        self.animation_list = [] # List to store character animations
-        self.frame_index = 0 # Current animation frame
-        self.update_time = pygame.time.get_ticks() # Timer to control animation speed
-        self.action = 0 # Current action (Idle, Run, etc.)
-        self.jump = False # Whether the character is jumping
-        self.in_air = False # Whether the character is in the air (not grounded)
-        self.ammo = ammo # Starting ammo count
-        self.shoot_cooldown = 0 # Cooldown for shooting
+    def __init__(self, x, y, scale, speed, ammo, char_type, grenades):
+        pygame.sprite.Sprite.__init__(self)
 
-        # Animation types (Idle, Run, etc.)
+        self.grenades = grenades
+        self.grenade_group = pygame.sprite.Group()
+        self.grenade_thrown = False
+        self.grenade = False
+
+        self.direction = 1
+        self.speed = speed
+        self.flip = False
+        self.moving_left = False
+        self.moving_right = False
+        self.jump = False
+        self.velocity_y = 0
+        self.in_air = False
+        self.ammo = ammo
+        self.start_ammo = ammo
+        self.shoot_cooldown = 0
+        self.health = 100
+        self.alive = True
+        self.shoot = False
+        self.bullets = pygame.sprite.Group()
+        self.char_type = char_type
+        self.animation_list = []
+        self.action = 0
+        self.frame = 0
+        self.update_time = pygame.time.get_ticks()
+
         animation_types = ['Idle', 'Run', 'Jump', 'Death']
+
         for animation in animation_types:
             temp_list = []
-            num_frames = len(os.listdir(f'img/{self.char_type}/{animation}')) # Get number of frames for each animation
 
-            # Load each frame of animation
+            num_frames = len(os.listdir(f'img/{self.char_type}/{animation}'))
+
             for i in range(num_frames):
                 img = pygame.image.load(f'img/{self.char_type}/{animation}/{i}.png')
-                img = pygame.transform.scale(img, (int(img.get_width() * scale), int(img.get_height() * scale))) # Scale the image
-                temp_list.append(img) # Add to the animation list
+                img = pygame.transform.scale(img, (int(img.get_width() * scale), int(img.get_height() * scale)))
+                temp_list.append(img)
 
-            self.animation_list.append(temp_list) # Append the animation list to the character's animations
-        self.image = self.animation_list[self.action][self.frame_index] # Set initial image/frame
+            self.animation_list.append(temp_list)
 
-        # Create a rectangle around the image for positioning
+        self.image = self.animation_list[self.action][self.frame]
         self.rect = self.image.get_rect()
-        self.rect.center = (x, y) # Position the character
-        self.direction = 1 # Character's facing direction (1 = right, -1 = left)
-        self.flip = False # Whether the character is flipped horizontally
-        self.speed = speed # Character's movement speed
-        self.velocity_y = 0 # Vertical velocity (used for jump and gravity)
-        self.health = health # Character's health
-        self.alive = True # Whether the character is alive
-        self.bullet_group = pygame.sprite.Group() # Group to hold the bullets fired by this character
+        self.rect.center = (x, y)
 
-    def draw(self):
-        # Draw the current frame of the character's animation to the screen
-        screen.blit(pygame.transform.flip(self.image, self.flip, False), self.rect)
+    def update_animation(self):
+        animation_cooldown = 100
+        self.image = self.animation_list[self.action][self.frame]
+        if pygame.time.get_ticks() - self.update_time > animation_cooldown:
+            self.update_time = pygame.time.get_ticks()
+            self.frame += 1
+        if self.frame >= len(self.animation_list[self.action])-1:
+            if self.action == 3:
+                self.frame = 7
+            else:
+                self.frame = 0
+
+    def update(self):
+        self.check_alive()
+        self.update_animation()
+        if self.shoot_cooldown >0:
+            self.shoot_cooldown-=1
 
     def move(self, moving_left, moving_right):
         dx = 0
         dy = 0
 
-        # Handle left and right movement
-        if moving_left:
+        if self.moving_left:
             dx = -self.speed
             self.flip = True
-            self.direction = -1 # Face left
+            self.direction = -1
 
-        if moving_right:
+        if self.moving_right:
             dx = self.speed
             self.flip = False
-            self.direction = 1 # Face right
+            self.direction = 1
 
-        # Handle jumping
         if self.jump == True and self.in_air == False:
+            self.velocity_y = -11
             self.jump = False
             self.in_air = True
-            self.velocity_y = -14 # Initial jump velocity
 
-        self.velocity_y += gravity # Apply gravity
-        if self.velocity_y > 10: # Terminal velocity limit
-            self.velocity_y = 10
+        self.velocity_y += gravity
 
-        dy += self.velocity_y # Update vertical position
+        if self.velocity_y > 10:
+            self.velocity_y
 
-        # Prevent falling below the ground
+        dy += self.velocity_y
+
         if self.rect.bottom + dy > 300:
             dy = 300 - self.rect.bottom
-            self.in_air = False # Stop falling when the character hits the ground
+            self.in_air = False
 
-        self.rect.x += dx # Update horizontal position
-        self.rect.y += dy # Update vertical position
+        self.rect.x += dx
+        self.rect.y += dy
 
-    def update_animation(self):
-        cooldown = 100 # Animation frame change time
-        self.image = self.animation_list[self.action][self.frame_index]
-        # Check if it's time to update the frame
-        if pygame.time.get_ticks() - self.update_time > cooldown:
-            self.update_time = pygame.time.get_ticks()
-            self.frame_index += 1
-        if self.frame_index >= len(self.animation_list[self.action]):
-            if self.action == 3: # Death animation doesn't loop
-                self.frame_index = len(self.animation_list[self.action]) - 1
-            else:
-                self.frame_index = 0 # Loop other animations
+    def draw(self):
+        screen.blit(pygame.transform.flip(self.image, self.flip, False), self.rect)
 
-    def update(self):
-        self.update_animation()
-        # Decrease shoot cooldown if it's greater than 0
-        if self.shoot_cooldown > 0:
-            self.shoot_cooldown -= 1
+    def fire(self):
+        if self.shoot_cooldown == 0 and self.ammo>0:
+            self.shoot_cooldown = 20
+            bullet = Bullet(self.rect.centerx + (.5 * self.rect.size[0] * self.direction), self.rect.centery, self.direction)
+            self.bullets.add(bullet)
+            self.ammo -=1
 
     def update_action(self, new_action):
-        # Change the character's action (Idle, Run, Jump, Death)
         if new_action != self.action:
             self.action = new_action
-            self.frame_index = 0
+            self.frame = 0
             self.update_time = pygame.time.get_ticks()
 
-    def shoot(self):
-        # Shoot a bullet if there is ammo and the cooldown is 0
-        if self.ammo > 0 and self.shoot_cooldown == 0:
-            self.shoot_cooldown = 20 # Set cooldown for shooting
-            bullet = Bullet(self.rect.centerx, self.rect.centery, self.direction)
-            self.bullet_group.add(bullet) # Add bullet to the bullet group
-            self.ammo -= 1 # Decrease ammo by 1
-
     def check_alive(self):
-        # Check if the character is still alive (health <= 0)
         if self.health <= 0:
+            self.health = 0
+            self.speed = 0
             self.alive = False
-            self.speed = 0 # Stop movement
-            self.update_action(3) # Change to death animation
+            self.update_action(3)
 
-# Bullet class to represent a bullet shot by the player or enemy
-bullet_img = pygame.image.load('img/icons/bullet.png')
+
+class Grenade(pygame.sprite.Sprite):
+    def __init__(self, x, y, direction):
+        pygame.sprite.Sprite.__init__(self)
+        self.timer = 100
+        self.vel_y = -11
+        self.speed = 7
+        self.image = pygame.image.load('img/icons/grenade.png')
+        self.rect = self.image.get_rect()
+        self.rect.center = (x,y)
+        self.direction = direction
+
+    def update(self):
+        self.vel_y += gravity
+        dx = self.direction * self.speed
+        dy = self.vel_y
+
+        if self.rect.bottom + dy > 300:
+            dy = 300 - self.rect.bottom
+            self.speed = 0
+
+        self.rect.x += dx
+        self.rect.y += dy
+
+        self.timer -= 1
+        if self.timer <= 0:
+            self.kill()
+            explosion = Explosion(self.rect.x, self.rect.y, .5)
+            exp_group.add(explosion)
+
+            if abs(self.rect.centerx - player.rect.centerx) < 80 and abs(self.rect.centery - player.rect.centery) < 80:
+                player.health -= 50
+
+            if abs(self.rect.centerx - enemy.rect.centerx) < 80 and abs(self.rect.centery - enemy.rect.centery) < 80:
+                enemy.health -= 50
+
+
+
+
+
+class Explosion(pygame.sprite.Sprite):
+    def __init__(self, x, y, scale):
+        pygame.sprite.Sprite.__init__(self)
+        self.images = []
+        for num in range(1,6):
+            img = pygame.image.load(f'img/explosion/exp{num}.png')
+            img = pygame.transform.scale(img, (int(img.get_width() * scale), int(img.get_height() * scale)))
+            self.images.append(img)
+        self.frame = 0
+        self.image = self.images[self.frame]
+        self.rect = self.image.get_rect()
+        self.rect.center = (x,y)
+        self.counter = 0
+
+    def update(self):
+        exp_speed = 4
+        self.counter +=1
+        if self.counter >= exp_speed:
+            self.counter = 0
+            self.frame +=1
+            if self.frame >= 5:
+                self.kill()
+            else:
+                self.image = self.images[self.frame]
+
 
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y, direction):
         pygame.sprite.Sprite.__init__(self)
-        self.speed = 10 # Bullet speed
-        self.image = bullet_img # Bullet image
+        self.speed = 10
+        self.image = pygame.image.load('img/icons/bullet.png')
         self.rect = self.image.get_rect()
-        self.rect.center = (x, y) # Position the bullet
-        self.direction = direction # Direction of the bullet
+        self.rect.center = (x,y)
+        self.direction = direction
 
     def update(self):
-        # Update bullet position based on direction
-        self.rect.x += self.direction * self.speed
+        self.rect.x += (self.direction * self.speed)
 
-        # Check for collision with player or enemy and decrease health
-        if pygame.sprite.spritecollide(player, player2.bullet_group, False):
+        if self.rect.right < 0 or self.rect.left > SCREEN_WIDTH:
+            self.kill()
+
+        if pygame.sprite.spritecollide(player, enemy.bullets, False):
             player.health -= 5
-            self.kill() # Destroy the bullet
+            self.kill()
+            print("Player health", player.health)
+        if pygame.sprite.spritecollide(enemy, player.bullets, False):
+            enemy.health -= 5
+            self.kill()
+            print("Enemy health", enemy.health)
 
-        if pygame.sprite.spritecollide(player2, player.bullet_group, False):
-            player2.health -= 5
-            self.kill() # Destroy the bullet
 
-# Initialize players (Soldiers)
-player = Soldier(200, 200, 3, 5, "player", 10, 100)
-player2 = Soldier(400, 200, 3, 5, "enemy", 10, 100)
 
-# Shooting flags
-player_shoot = False
-player2_shoot = False
 
-# Main game loop
+# player_bullets = pygame.sprite.Group()
+# enemy_bullets = pygame.sprite.Group()
+
+
+player = Soldier(200, 200, 3, 5, 20, 'player', 10)
+enemy = Soldier(250, 200, 3, 5, 20, 'enemy', 5)
+
 run = True
 while run:
-    clock.tick(FPS) # Maintain FPS
-    draw_background() # Draw background
+    clock.tick(frame_rate)
 
-    # Check if players are alive
-    player.check_alive()
-    player2.check_alive()
+    draw_background()
 
-    # Player movement and actions
+    player.draw()
+    enemy.draw()
+
+    player.move(player.moving_left, player.moving_right)
+    enemy.move(enemy.moving_left, enemy.moving_right)
+
+    player.update()
+    enemy.update()
+
+    player.bullets.update()
+    player.bullets.draw(screen)
+
+    enemy.bullets.update()
+    enemy.bullets.draw(screen)
+
+    player.grenade_group.update()
+    enemy.grenade_group.update()
+
+    player.grenade_group.draw(screen)
+    enemy.grenade_group.draw(screen)
+
+    exp_group.update()
+    exp_group.draw(screen)
+
     if player.alive:
-        player.move(moving_left, moving_right)
-        if player_shoot:
-            player.shoot()
-        if player.health <= 0:
-            player.update_action(3) # Death animation
+        if (player.moving_left or player.moving_right) and not enemy.in_air:
+            player.update_action(1)
         elif player.in_air:
-            player.update_action(2) # Jump animation
-        elif moving_left or moving_right:
-            player.update_action(1) # Run animation
+            player.update_action(2)
         else:
-            player.update_action(0) # Idle animation
+            player.update_action(0)
+        if player.shoot:
+            player.fire()
 
-    # Player 2 movement and actions
-    if player2.alive:
-        player2.move(ml, mr)
-        if player2_shoot:
-            player2.shoot()
-        if player2.health <= 0:
-            player2.update_action(3) # Death animation
-        elif player2.in_air:
-            player2.update_action(2) # Jump animation
-        elif ml or mr:
-            player2.update_action(1) # Run animation
+        elif player.grenade and player.grenade_thrown == False and player.grenades >0:
+            grenade = Grenade(player.rect.centerx, player.rect.top, player.direction)
+            player.grenade_group.add(grenade)
+            player.grenades -= 1
+            player.grenade_thrown = True
+
+    if enemy.alive:
+        if (enemy.moving_left or enemy.moving_right) and not enemy.in_air:
+            enemy.update_action(1)
+        elif enemy.in_air:
+            enemy.update_action(2)
         else:
-            player2.update_action(0) # Idle animation
+            enemy.update_action(0)
+        if enemy.shoot:
+            enemy.fire()
+        elif enemy.grenade and enemy.grenade_thrown == False and enemy.grenades >0:
+            grenade = Grenade(enemy.rect.centerx, enemy.rect.top, enemy.direction)
+            enemy.grenade_group.add(grenade)
+            enemy.grenades -= 1
+            enemy.grenade_thrown = True
 
-    player.update() # Update player state
-    player2.update() # Update player 2 state
-
-    player.draw() # Draw player
-    player2.draw() # Draw player 2
-
-    # Update and draw bullets for both players
-    player.bullet_group.update()
-    player.bullet_group.draw(screen)
-
-    player2.bullet_group.update()
-    player2.bullet_group.draw(screen)
-
-    # Event handling
     for event in pygame.event.get():
+
         if event.type == pygame.QUIT:
-            run = False # Exit the game if the window is closed
+            run = False
 
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_w:
-                player.jump = True # Player jump
-            if event.key == pygame.K_a:
-                moving_left = True # Player move left
-            if event.key == pygame.K_d:
-                moving_right = True # Player move right
-            if event.key == pygame.K_s:
-                player_shoot = True # Player shoot
-            if event.key == pygame.K_r and player.ammo <= 0:
-                player.ammo = 10 # Refill player ammo
 
-            if event.key == pygame.K_UP:
-                player2.jump = True # Player 2 jump
-            if event.key == pygame.K_LEFT:
-                ml = True # Player 2 move left
-            if event.key == pygame.K_RIGHT:
-                mr = True # Player 2 move right
-            if event.key == pygame.K_DOWN:
-                player2_shoot = True # Player 2 shoot
-            if event.key == pygame.K_SPACE and player2.ammo <= 0:
-                player2.ammo = 10 # Refill player 2 ammo
+
+            if player.alive:
+                if event.key == pygame.K_d:
+                    player.moving_right = True
+                if event.key == pygame.K_a:
+                    player.moving_left = True
+
+                if event.key == pygame.K_t:
+                    player.grenade = True
+
+                if event.key == pygame.K_w:
+                    player.jump = True
+
+                if event.key == pygame.K_SPACE:
+                    player.shoot = True
+            if enemy.alive:
+                if event.key == pygame.K_RIGHT:
+                    enemy.moving_right = True
+                if event.key == pygame.K_LEFT:
+                    enemy.moving_left = True
+
+                if event.key == pygame.K_UP:
+                    enemy.jump = True
+
+                if event.key == pygame.K_DOWN:
+                    enemy.shoot = True
+
+                if event.key == pygame.K_0:
+                    enemy.grenade = True
+
 
         if event.type == pygame.KEYUP:
-            if event.key == pygame.K_a:
-                moving_left = False # Stop moving left
             if event.key == pygame.K_d:
-                moving_right = False # Stop moving right
-            if event.key == pygame.K_LEFT:
-                ml = False # Stop moving left for player 2
+                player.moving_right = False
+            if event.key == pygame.K_a:
+                player.moving_left = False
+            if event.key == pygame.K_SPACE:
+                player.shoot = False
+            if event.key == pygame.K_t:
+                player.grenade = False
+                player.grenade_thrown = False
+
             if event.key == pygame.K_RIGHT:
-                mr = False # Stop moving right for player 2
-            if event.key == pygame.K_s:
-                player_shoot = False # Stop shooting for player
+                enemy.moving_right = False
+            if event.key == pygame.K_LEFT:
+                enemy.moving_left = False
             if event.key == pygame.K_DOWN:
-                player2_shoot = False # Stop shooting for player 2
+                enemy.shoot = False
+            if event.key == pygame.K_0:
+                enemy.grenade = False
+                enemy.grenade_thrown = False
 
-    pygame.display.update() # Update the screen
+    pygame.display.update()
 
-# Quit Pygame after the game loop ends
 pygame.quit()
